@@ -6,10 +6,10 @@ namespace Generator
 	{
 		NewLine,
 		Symbol,
-		//NonNegInt,
-		//NegInt,
-		Int,
+		NonNegInt,
+		NegInt,
 		Float,
+		String,
 		Identifier,
 		DepField
 	}

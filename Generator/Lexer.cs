@@ -9,10 +9,10 @@ namespace Generator
 	class Lexer
 	{
 		private readonly static char[] LoneSymbols = {
-			'+','-','*','/','%','>','<','~','!','?',/*'@','$',*/'=','&'
+			'+','-','*','%','>','<','~','!','?','\\',/*'@','$',*/'=','&'
 		};
 		private readonly static char[] MultiSymbols = {
-			'|','\\'
+			'|','/'
 		};
 
 		private static readonly string[] Keywords = { };
@@ -28,6 +28,7 @@ namespace Generator
 			Identifier,
 			SymbolLine,
 			SymbolSlash,
+			SymbolMinus,
 			SymbolAt,
 			CommentSingleline,
 			CommentMultiline,
@@ -53,7 +54,7 @@ namespace Generator
 			Word,
 			Float,
 			// base 10 integer
-			Dec,
+			Base10,
 			Hex,
 			Bin,
 			String,
@@ -63,7 +64,7 @@ namespace Generator
 		}
 
 		bool IsNegative = false;
-
+		bool ContinueLine;
 		private readonly StringBuilder builder = new StringBuilder();
 		protected readonly StringBuilder UEscBuild = new StringBuilder();
 
@@ -72,18 +73,27 @@ namespace Generator
 		private uint LineNumber;
 		private LexerStatus State;
 
+		public IReadOnlyList<Token> Parse(string text)
+		{
+			Tokens.Clear();
+			foreach (char c in text) ReadChar(c);
+			return Tokens.ToList();
+		}
+
 		protected void ReadChar(char c)
 		{
 			if (c == '\n')
 			{
 				LineNumber++;
+				if(ContinueLine) { ContinueLine = false; return; }
 				if (State < LexerStatus.CommentSingleline)
 				{
 					Pop();
 					Tokens.Add(new Token(Generator.TokenType.NewLine, LineNumber, "", 0));
+					return;
 				}
 			}
-			else if (State < LexerStatus.CommentSingleline)
+			if (State < LexerStatus.CommentSingleline)
 				BaseReadChar(c);
 			else if (State < LexerStatus.StringBase)
 				CommentReadChar(c);
@@ -97,9 +107,20 @@ namespace Generator
 			{
 				Pop();
 				TokenType = LexerTokenType.Operator;
-				builder.Append(c);
-				Pop();
-				return;
+				switch (c)
+				{
+					case '\\':
+						ContinueLine = true;
+						return;
+					case '-':
+						State = LexerStatus.SymbolMinus;
+						builder.Append(c);
+						return;
+					default:
+						builder.Append(c);
+						Pop();
+						return;
+				}
 			}
 			if (c == '"')
 			{
@@ -112,7 +133,7 @@ namespace Generator
 			{
 				switch (c)
 				{
-					case '\\':
+					case '/':
 						State = LexerStatus.SymbolSlash;
 						builder.Append(c);
 						return;
@@ -129,7 +150,7 @@ namespace Generator
 					if (char.IsDigit(c))
 					{
 						builder.Append(c);
-						TokenType = LexerTokenType.Dec;
+						TokenType = LexerTokenType.Base10;
 						if (c == '0') State = LexerStatus.Zero;
 						else State = LexerStatus.Number;
 					}
@@ -214,6 +235,21 @@ namespace Generator
 					TokenType = LexerTokenType.Word;
 					State = LexerStatus.Identifier;
 					break;
+				case LexerStatus.SymbolMinus:
+					if (char.IsDigit(c))
+					{
+						builder.Append(c);
+						State = LexerStatus.Number;
+						TokenType = LexerTokenType.Base10;
+						IsNegative = true;
+					}
+					else
+					{
+						TokenType = LexerTokenType.SyntaxSymbol;
+						Pop();
+						State = LexerStatus.Base;
+					}
+					break;
 				default:
 					break;
 			}
@@ -236,27 +272,78 @@ namespace Generator
 
 		private void StrReadChar(char c)
 		{
-			throw new NotImplementedException();
+			switch (State)
+			{
+				case LexerStatus.StringBase:
+					if (c == '"') Pop();
+					else if (c == '\\') State = LexerStatus.StringEsc;
+					else builder.Append(c);
+					break;
+				case LexerStatus.StringEsc:
+					if (c == 'u' || c == 'x') throw new NotImplementedException();
+					builder.Append(char.Parse($"\\{c}"));
+					break;
+				case LexerStatus.StringU0:
+				case LexerStatus.StringU1:
+				case LexerStatus.StringU2:
+				case LexerStatus.StringU3:
+					throw new NotImplementedException();
+				case LexerStatus.LitString:
+					if (c == '"') Pop();
+					break;
+				default:
+					break;
+			}
 		}
 
-		protected void Pop()
+		protected unsafe void Pop()
 		{
 			ulong data = 0;
 			var type = Generator.TokenType.Identifier;
+			var str = builder.ToString();
 			switch (TokenType)
 			{
 				case LexerTokenType.Unknown:
 				case LexerTokenType.Word:
+					if (str.StartsWith('@')) type = Generator.TokenType.DepField;
 					break;
 				case LexerTokenType.Float:
-					break;
-				case LexerTokenType.Dec:
+					{
+						type = Generator.TokenType.Float;
+						var x = double.Parse(str);
+						data = *((ulong*)&x);
+						break;
+					}
+				case LexerTokenType.Base10:
+					if (IsNegative)
+					{
+						type = Generator.TokenType.NegInt;
+						var x = long.Parse(str);
+						data = *((ulong*)&x);
+					}
+					else
+					{
+						type = Generator.TokenType.NonNegInt;
+						data = ulong.Parse(str);
+					}
 					break;
 				case LexerTokenType.Hex:
+					if (IsNegative)
+					{
+						type = Generator.TokenType.NegInt;
+						var x = long.Parse(str, System.Globalization.NumberStyles.HexNumber);
+						data = *((ulong*)&x);
+					}
+					else
+					{
+						type = Generator.TokenType.NonNegInt;
+						data = ulong.Parse(str, System.Globalization.NumberStyles.HexNumber);
+					}
 					break;
 				case LexerTokenType.Bin:
-					break;
+					throw new NotImplementedException();
 				case LexerTokenType.String:
+					type = Generator.TokenType.String;
 					break;
 				case LexerTokenType.Assignment:
 				case LexerTokenType.Operator:
@@ -267,8 +354,11 @@ namespace Generator
 					break;
 			}
 
-			Tokens.Add(new Token(type, LineNumber, builder.ToString(), data));
+			Tokens.Add(new Token(type, LineNumber, str, data));
 			builder.Clear();
+			IsNegative = false;
+			State = LexerStatus.Base;
+			TokenType = LexerTokenType.Unknown;
 		}
 	}
 }
