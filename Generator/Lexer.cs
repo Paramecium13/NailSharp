@@ -9,7 +9,7 @@ namespace Generator
 	class Lexer
 	{
 		private readonly static char[] LoneSymbols = {
-			'+','-','*','%','>','<','~','!','?','\\',/*'@','$',*/'=','&'
+			'+',';','-','*','%','>','<','~','!','?','\\',/*'@','$',*/'=','&'
 		};
 		private readonly static char[] MultiSymbols = {
 			'|','/'
@@ -116,6 +116,10 @@ namespace Generator
 						State = LexerStatus.SymbolMinus;
 						builder.Append(c);
 						return;
+					case ';':
+						Pop();
+						Tokens.Add(new Token(Generator.TokenType.NewLine, LineNumber, "", 0));
+						return;
 					default:
 						builder.Append(c);
 						Pop();
@@ -159,6 +163,12 @@ namespace Generator
 						builder.Append(c);
 						TokenType = LexerTokenType.Word;
 						State = LexerStatus.SymbolAt;
+					}
+					else
+					{
+						builder.Append(c);
+						TokenType = LexerTokenType.Word;
+						State = LexerStatus.Identifier;
 					}
 					break;
 				case LexerStatus.Zero:
@@ -213,7 +223,7 @@ namespace Generator
 					break;
 				case LexerStatus.SymbolLine:
 					throw new NotImplementedException();
-					break;
+					//break;
 				case LexerStatus.SymbolSlash:
 					if (c == '\\')
 					{
@@ -305,7 +315,7 @@ namespace Generator
 			{
 				case LexerTokenType.Unknown:
 				case LexerTokenType.Word:
-					if (str.StartsWith('@')) type = Generator.TokenType.DepField;
+					if (str.StartsWith("@", StringComparison.Ordinal)) type = Generator.TokenType.DepField;
 					break;
 				case LexerTokenType.Float:
 					{
@@ -354,7 +364,8 @@ namespace Generator
 					break;
 			}
 
-			Tokens.Add(new Token(type, LineNumber, str, data));
+			if(str.Length != 0)
+				Tokens.Add(new Token(type, LineNumber, str, data));
 			builder.Clear();
 			IsNegative = false;
 			State = LexerStatus.Base;

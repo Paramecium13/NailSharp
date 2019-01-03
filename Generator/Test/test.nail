@@ -1,0 +1,10 @@
+﻿
+foo = {
+	bar int32
+	baz uint8
+	pet cat
+}
+
+cat = {
+	age uint16
+}
